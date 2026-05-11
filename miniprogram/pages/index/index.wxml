@@ -1,0 +1,99 @@
+<view class="page">
+  <view class="topbar">
+    <view>
+      <text class="eyebrow">Trade Quant</text>
+      <text class="title">量化回测</text>
+    </view>
+    <view class="state {{authenticated ? 'state-on' : ''}}">
+      {{authenticated ? '已连接' : '未连接'}}
+    </view>
+  </view>
+
+  <view class="server">
+    <text class="server-label">后端服务</text>
+    <text class="server-url">{{baseUrl}}</text>
+  </view>
+
+  <view wx:if="{{!authenticated}}" class="panel">
+    <view class="panel-title">后端登录</view>
+    <label class="field">
+      <text>账号</text>
+      <input value="{{form.username}}" data-key="username" bindinput="onInput" placeholder="admin" />
+    </label>
+    <label class="field">
+      <text>密码</text>
+      <input value="{{form.password}}" data-key="password" bindinput="onInput" password placeholder="trade123" />
+    </label>
+    <button class="primary" loading="{{loading}}" bindtap="login">连接服务</button>
+  </view>
+
+  <view wx:else class="panel">
+    <view class="panel-row">
+      <view>
+        <view class="panel-title">回测参数</view>
+        <view class="subtle">当前账号：{{username}}</view>
+      </view>
+      <button class="ghost" bindtap="logout">退出</button>
+    </view>
+
+    <label class="field">
+      <text>数据集</text>
+      <picker mode="selector" range="{{datasets}}" bindchange="onDatasetChange">
+        <view class="picker">{{form.data}}</view>
+      </picker>
+    </label>
+
+    <view class="grid">
+      <label class="field compact">
+        <text>初始资金</text>
+        <input type="digit" value="{{form.cash}}" data-key="cash" bindinput="onInput" />
+      </label>
+      <label class="field compact">
+        <text>短均线</text>
+        <input type="number" value="{{form.short_window}}" data-key="short_window" bindinput="onInput" />
+      </label>
+      <label class="field compact">
+        <text>长均线</text>
+        <input type="number" value="{{form.long_window}}" data-key="long_window" bindinput="onInput" />
+      </label>
+      <label class="field compact">
+        <text>手续费</text>
+        <input type="digit" value="{{form.commission_rate}}" data-key="commission_rate" bindinput="onInput" />
+      </label>
+      <label class="field compact">
+        <text>滑点</text>
+        <input type="digit" value="{{form.slippage_rate}}" data-key="slippage_rate" bindinput="onInput" />
+      </label>
+    </view>
+
+    <button class="primary" loading="{{loading}}" bindtap="runBacktest">获取结果</button>
+  </view>
+
+  <view class="status">{{status}}</view>
+
+  <view wx:if="{{metrics.length}}" class="metrics">
+    <view wx:for="{{metrics}}" wx:key="label" class="metric">
+      <text>{{item.label}}</text>
+      <text class="metric-value">{{item.value}}</text>
+    </view>
+  </view>
+
+  <view wx:if="{{metaText}}" class="panel">
+    <view class="panel-title">最近信号</view>
+    <view class="meta">{{metaText}}</view>
+    <view class="table">
+      <view class="thead">
+        <text>日期</text>
+        <text>收盘</text>
+        <text>净值</text>
+        <text>信号</text>
+      </view>
+      <view wx:for="{{latestRows}}" wx:key="date" class="tr">
+        <text>{{item.date}}</text>
+        <text>{{item.close}}</text>
+        <text>{{item.equity}}</text>
+        <text>{{item.signal}}</text>
+      </view>
+    </view>
+  </view>
+</view>
