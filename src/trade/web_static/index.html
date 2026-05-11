@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Trade Quant Dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <section id="auth-screen" class="auth-screen">
+      <div class="auth-grid" aria-hidden="true"></div>
+      <form id="login-form" class="auth-panel">
+        <span class="system-chip">ACCESS GATE</span>
+        <h1>Trade Quant</h1>
+        <p>量化指挥终端</p>
+
+        <label>
+          账户
+          <input name="username" autocomplete="username" value="admin" />
+        </label>
+        <label>
+          密钥
+          <input name="password" type="password" autocomplete="current-password" value="trade123" />
+        </label>
+
+        <button type="submit">授权进入</button>
+        <p id="login-status" class="status">默认账户 admin / trade123，可用环境变量覆盖</p>
+      </form>
+    </section>
+
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="mark" aria-hidden="true">TQ</span>
+        <div>
+          <h1>Trade Quant</h1>
+          <p>Orbital Backtest Console</p>
+        </div>
+      </div>
+
+      <form id="backtest-form" class="control-panel">
+        <label>
+          数据文件
+          <select id="data" name="data"></select>
+        </label>
+
+        <div class="field-row">
+          <label>
+            初始资金
+            <input name="cash" type="number" min="1000" step="1000" value="100000" />
+          </label>
+          <label>
+            策略
+            <select name="strategy">
+              <option value="moving_average">双均线</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="field-row">
+          <label>
+            短均线
+            <input name="short_window" type="number" min="1" step="1" value="20" />
+          </label>
+          <label>
+            长均线
+            <input name="long_window" type="number" min="2" step="1" value="60" />
+          </label>
+        </div>
+
+        <div class="field-row">
+          <label>
+            手续费率
+            <input name="commission_rate" type="number" min="0" step="0.0001" value="0.0003" />
+          </label>
+          <label>
+            滑点率
+            <input name="slippage_rate" type="number" min="0" step="0.0001" value="0.0002" />
+          </label>
+        </div>
+
+        <button type="submit">启动回测</button>
+        <p id="status" class="status">准备就绪</p>
+      </form>
+    </aside>
+
+    <main class="main">
+      <section class="toolbar">
+        <div>
+          <h2>策略遥测</h2>
+          <p id="meta">等待回测数据</p>
+        </div>
+        <div class="session">
+          <span id="session-user">未授权</span>
+          <button id="logout-button" type="button">退出</button>
+        </div>
+      </section>
+
+      <section class="metrics" id="metrics"></section>
+
+      <section class="chart-area">
+        <div class="chart-header">
+          <h3>净值与价格</h3>
+          <span>Equity / Close</span>
+        </div>
+        <canvas id="equity-chart" width="1200" height="460"></canvas>
+      </section>
+
+      <section class="chart-area compact">
+        <div class="chart-header">
+          <h3>回撤</h3>
+          <span>Drawdown</span>
+        </div>
+        <canvas id="drawdown-chart" width="1200" height="220"></canvas>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
