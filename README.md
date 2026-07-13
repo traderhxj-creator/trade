@@ -2,6 +2,10 @@
 
 一个轻量级 Python 量化回测系统骨架，适合从本地 CSV 快速跑通策略验证。
 
+## 文档
+
+- [架构设计图与维护约定](docs/architecture.md)
+
 ## 功能
 
 - CSV 行情数据读取
@@ -11,6 +15,12 @@
 - 手续费、滑点
 - 净值曲线、最大回撤、夏普比率等指标
 - CLI 命令行入口
+- 本地 Web 可视化页面
+- 数据画像、参数预设、回测历史记录
+- Markdown 报告导出、曲线 CSV 导出
+- 微信小程序结果查看端
+- 数据源 provider 扩展边界
+- 策略注册表，便于后续扩展更多策略
 
 ## 项目结构
 
@@ -18,16 +28,29 @@
 trade/
   data/
     sample_prices.csv
+  docs/
+    architecture.md
   src/trade/
     backtester.py
     cli.py
     metrics.py
     models.py
+    web.py
     data/
+      __init__.py
       loader.py
+      providers.py
     strategies/
+      __init__.py
       base.py
       moving_average.py
+      registry.py
+    web_static/
+      index.html
+      app.js
+      styles.css
+  miniprogram/
+    pages/index/
   tests/
     test_backtester.py
 ```
@@ -48,6 +71,8 @@ trade backtest \
   --data data/sample_prices.csv \
   --strategy moving_average \
   --cash 100000 \
+  --start 2024-01-01 \
+  --end 2024-12-31 \
   --short-window 20 \
   --long-window 60
 ```
@@ -78,7 +103,15 @@ export TRADE_WEB_PASSWORD="your-password"
 export TRADE_WEB_SECRET="a-long-random-secret"
 ```
 
-页面支持选择 CSV 数据、调整初始资金、均线窗口、手续费和滑点，并展示关键指标、净值曲线、价格曲线和回撤曲线。
+页面支持选择 CSV 数据、查看数据画像、调整初始资金、套用均线参数预设、设置手续费和滑点，并展示关键指标、净值曲线、价格曲线、回撤曲线、回测报告和最近历史记录。每次回测会生成 Markdown 报告和曲线 CSV，可直接在页面导出。
+
+回测历史保存在：
+
+```text
+data/backtest_history.jsonl
+```
+
+历史记录用于本地研究复盘，不建议提交真实账户或敏感研究记录。
 
 ## 微信小程序端
 
@@ -93,7 +126,10 @@ miniprogram/
 ```text
 POST /api/login
 GET  /api/datasets
+GET  /api/dataset-profile
+GET  /api/strategies
 GET  /api/backtest
+GET  /api/backtest-history
 POST /api/logout
 ```
 
@@ -129,5 +165,7 @@ date,open,high,low,close,volume
 - 加调仓周期和目标权重
 - 加 DuckDB/Parquet 数据层
 - 加策略参数批量优化
+- 加多策略对比和批量分析
+- 加技术面、基本面、新闻情绪和风险分析报告
 - 加交易日历、涨跌停、成交量约束
 - 接入模拟盘或券商 API

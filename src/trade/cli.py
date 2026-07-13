@@ -10,12 +10,13 @@ def format_pct(value: float) -> str:
 
 def run_backtest(args: argparse.Namespace) -> None:
     from trade.backtester import Backtester
-    from trade.data.loader import load_price_csv
+    from trade.data import CsvPriceProvider
     from trade.models import BacktestConfig
-    from trade.strategies import MovingAverageCrossStrategy
+    from trade.strategies import build_strategy
 
-    prices = load_price_csv(args.data)
-    strategy = MovingAverageCrossStrategy(
+    prices = CsvPriceProvider(args.data).load(start=args.start, end=args.end)
+    strategy = build_strategy(
+        args.strategy,
         short_window=args.short_window,
         long_window=args.long_window,
     )
@@ -46,12 +47,16 @@ def run_web(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from trade.strategies import strategy_names
+
     parser = argparse.ArgumentParser(prog="trade")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     backtest = subparsers.add_parser("backtest", help="Run a single-symbol backtest.")
     backtest.add_argument("--data", required=True, help="Path to OHLCV CSV file.")
-    backtest.add_argument("--strategy", default="moving_average", choices=["moving_average"])
+    backtest.add_argument("--strategy", default="moving_average", choices=strategy_names())
+    backtest.add_argument("--start", help="Optional inclusive start date, for example 2024-01-01.")
+    backtest.add_argument("--end", help="Optional inclusive end date, for example 2024-12-31.")
     backtest.add_argument("--cash", type=float, default=100_000.0)
     backtest.add_argument("--commission-rate", type=float, default=0.0003)
     backtest.add_argument("--slippage-rate", type=float, default=0.0002)

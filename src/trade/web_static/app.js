@@ -8,8 +8,17 @@ const statusEl = document.querySelector("#status");
 const metricsEl = document.querySelector("#metrics");
 const metaEl = document.querySelector("#meta");
 const dataSelect = document.querySelector("#data");
+const strategySelect = document.querySelector("#strategy");
 const equityCanvas = document.querySelector("#equity-chart");
 const drawdownCanvas = document.querySelector("#drawdown-chart");
+const profileEl = document.querySelector("#dataset-profile");
+const reportPreviewEl = document.querySelector("#report-preview");
+const historyListEl = document.querySelector("#history-list");
+const downloadReportButton = document.querySelector("#download-report");
+const downloadCsvButton = document.querySelector("#download-csv");
+const presetButtons = document.querySelectorAll(".preset-button");
+
+let currentPayload = null;
 
 const pct = (value) => `${(value * 100).toFixed(2)}%`;
 const money = (value) =>
@@ -42,6 +51,69 @@ function renderMetrics(result) {
   metricsEl.innerHTML = items
     .map(([label, value]) => `<article class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`)
     .join("");
+}
+
+function renderProfile(profile) {
+  const items = [
+    ["数据文件", profile.data],
+    ["样本区间", `${profile.first_date} ~ ${profile.last_date}`],
+    ["行数", profile.rows],
+    ["缺失值", profile.missing_values],
+    ["收盘价范围", `${profile.close_min} ~ ${profile.close_max}`],
+    ["买入持有", pct(profile.buy_and_hold_return)],
+    ["年化波动", pct(profile.annualized_volatility)],
+  ];
+
+  profileEl.innerHTML = items
+    .map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`)
+    .join("");
+}
+
+function renderHistory(history) {
+  if (!history.length) {
+    historyListEl.innerHTML = `<p class="empty-state">暂无历史记录</p>`;
+    return;
+  }
+
+  historyListEl.innerHTML = history
+    .map((item) => {
+      const range = [item.start, item.end].filter(Boolean).join(" ~ ") || "全区间";
+      return `
+        <article class="history-item">
+          <div>
+            <strong>${escapeHtml(item.data)} · MA(${escapeHtml(item.short_window)}, ${escapeHtml(item.long_window)})</strong>
+            <span>${escapeHtml(range)} · ${escapeHtml(item.generated_at)}</span>
+          </div>
+          <div class="history-metrics">
+            <span>收益 ${escapeHtml(pct(item.total_return))}</span>
+            <span>回撤 ${escapeHtml(pct(item.max_drawdown))}</span>
+            <span>夏普 ${escapeHtml(Number(item.sharpe_ratio).toFixed(2))}</span>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function downloadText(filename, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function validateParams() {
+  const data = new FormData(form);
+  const shortWindow = Number(data.get("short_window"));
+  const longWindow = Number(data.get("long_window"));
+  if (shortWindow >= longWindow) {
+    throw new Error("短均线必须小于长均线");
+  }
 }
 
 function normalize(values, height, padding) {
@@ -124,7 +196,41 @@ async function loadDatasets() {
     .join("");
 }
 
+async function loadDatasetProfile() {
+  if (!dataSelect.value) return;
+  const params = new URLSearchParams({ data: dataSelect.value });
+  const response = await fetch(`/api/dataset-profile?${params.toString()}`);
+  const payload = await response.json();
+  if (response.status === 401) {
+    setAuthenticated(null);
+    throw new Error("请先完成授权");
+  }
+  if (!response.ok || payload.error) {
+    throw new Error(payload.error || "数据画像加载失败");
+  }
+  renderProfile(payload.profile);
+}
+
+async function loadStrategies() {
+  const response = await fetch("/api/strategies");
+  const payload = await response.json();
+  if (response.status === 401) {
+    setAuthenticated(null);
+    throw new Error("请先完成授权");
+  }
+  strategySelect.innerHTML = payload.strategies
+    .map((item) => `<option value="${escapeHtml(item.name)}">${escapeHtml(item.label)}</option>`)
+    .join("");
+}
+
 async function runBacktest() {
+  try {
+    validateParams();
+  } catch (error) {
+    statusEl.textContent = error.message;
+    return;
+  }
+
   statusEl.textContent = "回测运行中...";
   const params = new URLSearchParams(new FormData(form));
   const response = await fetch(`/api/backtest?${params.toString()}`);
@@ -141,7 +247,12 @@ async function runBacktest() {
     return;
   }
 
+  currentPayload = payload;
   renderMetrics(payload.result);
+  renderProfile(payload.profile);
+  reportPreviewEl.textContent = payload.report_markdown;
+  downloadReportButton.disabled = false;
+  downloadCsvButton.disabled = false;
   drawLineChart(equityCanvas, payload.series, [
     { key: "equity", color: "#22d3ee", width: 3 },
     { key: "close", color: "#f59e0b", width: 2 },
@@ -149,8 +260,23 @@ async function runBacktest() {
   drawLineChart(drawdownCanvas, payload.series, [
     { key: "drawdown", color: "#fb7185", width: 3 },
   ]);
-  metaEl.textContent = `${payload.meta.data} · ${payload.meta.rows} 行 · MA(${payload.meta.short_window}, ${payload.meta.long_window})`;
+  const range = [payload.meta.start, payload.meta.end].filter(Boolean).join(" ~ ");
+  const rangeText = range ? ` · ${range}` : "";
+  metaEl.textContent = `${payload.meta.data} · ${payload.meta.rows} 行 · ${payload.meta.strategy} · MA(${payload.meta.short_window}, ${payload.meta.long_window})${rangeText}`;
   statusEl.textContent = "回测完成";
+  await loadHistory();
+}
+
+async function loadHistory() {
+  const response = await fetch("/api/backtest-history?limit=12");
+  const payload = await response.json();
+  if (response.status === 401) {
+    setAuthenticated(null);
+    return;
+  }
+  if (response.ok && !payload.error) {
+    renderHistory(payload.history);
+  }
 }
 
 async function bootstrap() {
@@ -161,13 +287,44 @@ async function bootstrap() {
     return;
   }
   setAuthenticated(payload.username);
+  await loadStrategies();
   await loadDatasets();
+  await loadDatasetProfile();
+  await loadHistory();
   await runBacktest();
 }
 
 form.addEventListener("submit", (event) => {
   event.preventDefault();
   runBacktest();
+});
+
+form.addEventListener("input", () => {
+  statusEl.textContent = "参数已变更，点击启动回测刷新结果";
+});
+
+dataSelect.addEventListener("change", () => {
+  loadDatasetProfile().catch((error) => {
+    statusEl.textContent = error.message;
+  });
+});
+
+presetButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    form.elements.short_window.value = button.dataset.short;
+    form.elements.long_window.value = button.dataset.long;
+    statusEl.textContent = `已应用 MA(${button.dataset.short}, ${button.dataset.long})`;
+  });
+});
+
+downloadReportButton.addEventListener("click", () => {
+  if (!currentPayload) return;
+  downloadText(`backtest-${currentPayload.meta.run_id}.md`, currentPayload.report_markdown, "text/markdown;charset=utf-8");
+});
+
+downloadCsvButton.addEventListener("click", () => {
+  if (!currentPayload) return;
+  downloadText(`backtest-${currentPayload.meta.run_id}.csv`, currentPayload.series_csv, "text/csv;charset=utf-8");
 });
 
 loginForm.addEventListener("submit", async (event) => {
@@ -188,7 +345,10 @@ loginForm.addEventListener("submit", async (event) => {
 
   setAuthenticated(payload.username);
   loginStatusEl.textContent = "授权通过";
+  await loadStrategies();
   await loadDatasets();
+  await loadDatasetProfile();
+  await loadHistory();
   await runBacktest();
 });
 

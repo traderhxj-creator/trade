@@ -12,6 +12,11 @@ class Backtester:
         self.config = config or BacktestConfig()
 
     def run(self, prices: pd.DataFrame, strategy: Strategy) -> tuple[pd.DataFrame, BacktestResult]:
+        if prices.empty:
+            raise ValueError("prices must contain at least one row.")
+        if "close" not in prices.columns:
+            raise ValueError("prices must include a close column.")
+
         signals = strategy.generate_signals(prices)
 
         frame = prices.copy()

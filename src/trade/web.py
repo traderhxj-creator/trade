@@ -3,17 +3,19 @@ import os
 import secrets
 import time
 from dataclasses import asdict
+from datetime import datetime, timezone
 from hashlib import sha256
 from hmac import compare_digest, new as hmac_new
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
 
 STATIC_DIR = Path(__file__).with_name("web_static")
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / "data"
+HISTORY_PATH = DATA_DIR / "backtest_history.jsonl"
 SESSION_COOKIE = "trade_session"
 SESSION_TTL_SECONDS = 60 * 60 * 8
 AUTH_USER = os.environ.get("TRADE_WEB_USER", "admin")
@@ -56,17 +58,24 @@ def _static_response(handler: BaseHTTPRequestHandler, path: Path, content_type: 
 
 
 def _float(params: dict[str, list[str]], key: str, default: float) -> float:
+    raw_value = params.get(key, [default])[0]
     try:
-        return float(params.get(key, [default])[0])
+        return float(raw_value)
     except (TypeError, ValueError):
-        return default
+        raise ValueError(f"{key} must be a number.")
 
 
 def _int(params: dict[str, list[str]], key: str, default: int) -> int:
+    raw_value = params.get(key, [default])[0]
     try:
-        return int(params.get(key, [default])[0])
+        return int(raw_value)
     except (TypeError, ValueError):
-        return default
+        raise ValueError(f"{key} must be an integer.")
+
+
+def _optional_str(params: dict[str, list[str]], key: str) -> Optional[str]:
+    value = params.get(key, [""])[0].strip()
+    return value or None
 
 
 def _safe_data_path(raw_path: str) -> Path:
@@ -153,6 +162,14 @@ def _constant_time_equal(left: str, right: str) -> bool:
     return compare_digest(left.encode("utf-8"), right.encode("utf-8"))
 
 
+def _pct(value: float) -> str:
+    return f"{value * 100:.2f}%"
+
+
+def _money(value: float) -> str:
+    return f"{value:,.2f}"
+
+
 def list_csv_files() -> list[str]:
     if not DATA_DIR.exists():
         return []
@@ -162,28 +179,184 @@ def list_csv_files() -> list[str]:
     ]
 
 
+def list_strategy_specs() -> list[dict[str, str]]:
+    from trade.strategies import available_strategies
+
+    return [
+        {
+            "name": spec.name,
+            "label": spec.label,
+            "description": spec.description,
+        }
+        for spec in available_strategies()
+    ]
+
+
+def dataset_profile(raw_path: str) -> dict[str, Any]:
+    from trade.data import CsvPriceProvider
+
+    data_path = _safe_data_path(raw_path)
+    prices = CsvPriceProvider(data_path).load()
+    missing_values = int(prices.isna().sum().sum())
+    first_date = prices.index.min().strftime("%Y-%m-%d")
+    last_date = prices.index.max().strftime("%Y-%m-%d")
+    close = prices["close"]
+    total_return_value = float(close.iloc[-1] / close.iloc[0] - 1)
+    daily_returns = close.pct_change().dropna()
+    volatility = float(daily_returns.std() * (252 ** 0.5)) if not daily_returns.empty else 0.0
+
+    return {
+        "data": str(data_path.relative_to(PROJECT_ROOT)),
+        "rows": int(len(prices)),
+        "columns": list(prices.columns),
+        "first_date": first_date,
+        "last_date": last_date,
+        "missing_values": missing_values,
+        "close_min": round(float(close.min()), 4),
+        "close_max": round(float(close.max()), 4),
+        "close_start": round(float(close.iloc[0]), 4),
+        "close_end": round(float(close.iloc[-1]), 4),
+        "buy_and_hold_return": round(total_return_value, 6),
+        "annualized_volatility": round(volatility, 6),
+    }
+
+
+def _build_report(payload: dict[str, Any]) -> str:
+    result = payload["result"]
+    meta = payload["meta"]
+    profile = payload.get("profile", {})
+    generated_at = meta["generated_at"]
+    range_text = " ~ ".join(
+        value for value in [meta.get("start") or profile.get("first_date"), meta.get("end") or profile.get("last_date")] if value
+    )
+
+    return "\n".join(
+        [
+            "# 回测研究报告",
+            "",
+            "## 摘要",
+            "",
+            f"- 生成时间: {generated_at}",
+            f"- 数据文件: {meta['data']}",
+            f"- 样本区间: {range_text or '未指定'}",
+            f"- 策略: {meta['strategy']}",
+            f"- 参数: MA({meta['short_window']}, {meta['long_window']}), 初始资金 {_money(meta['cash'])}",
+            "",
+            "## 核心指标",
+            "",
+            f"- 期末净值: {_money(result['final_equity'])}",
+            f"- 总收益: {_pct(result['total_return'])}",
+            f"- 年化收益: {_pct(result['annual_return'])}",
+            f"- 最大回撤: {_pct(result['max_drawdown'])}",
+            f"- 夏普比率: {result['sharpe_ratio']:.2f}",
+            f"- 交易次数: {result['trades']}",
+            "",
+            "## 数据画像",
+            "",
+            f"- 行数: {profile.get('rows', meta['rows'])}",
+            f"- 缺失值: {profile.get('missing_values', 0)}",
+            f"- 收盘价范围: {profile.get('close_min', '-')} ~ {profile.get('close_max', '-')}",
+            f"- 买入持有收益: {_pct(float(profile.get('buy_and_hold_return', 0)))}",
+            f"- 年化波动率: {_pct(float(profile.get('annualized_volatility', 0)))}",
+            "",
+            "## 风险提示",
+            "",
+            "本报告仅用于研究和教育目的，不构成投资建议。历史回测不代表未来表现，实际交易还会受到滑点、流动性、停牌、涨跌停和执行延迟等因素影响。",
+            "",
+        ]
+    )
+
+
+def _series_to_csv(series: list[dict[str, Any]]) -> str:
+    columns = ["date", "close", "equity", "drawdown", "position", "signal"]
+    lines = [",".join(columns)]
+    for row in series:
+        lines.append(",".join(str(row[column]) for column in columns))
+    return "\n".join(lines) + "\n"
+
+
+def _history_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    result = payload["result"]
+    meta = payload["meta"]
+    return {
+        "id": meta["run_id"],
+        "generated_at": meta["generated_at"],
+        "data": meta["data"],
+        "strategy": meta["strategy"],
+        "short_window": meta["short_window"],
+        "long_window": meta["long_window"],
+        "cash": meta["cash"],
+        "start": meta["start"],
+        "end": meta["end"],
+        "rows": meta["rows"],
+        "final_equity": result["final_equity"],
+        "total_return": result["total_return"],
+        "annual_return": result["annual_return"],
+        "max_drawdown": result["max_drawdown"],
+        "sharpe_ratio": result["sharpe_ratio"],
+        "trades": result["trades"],
+    }
+
+
+def _append_history(payload: dict[str, Any]) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with HISTORY_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(_history_summary(payload), ensure_ascii=False) + "\n")
+
+
+def list_backtest_history(limit: int = 20) -> list[dict[str, Any]]:
+    if not HISTORY_PATH.exists():
+        return []
+
+    rows: list[dict[str, Any]] = []
+    with HISTORY_PATH.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return list(reversed(rows[-limit:]))
+
+
 def run_backtest_from_params(params: dict[str, list[str]]) -> dict:
     from trade.backtester import Backtester
-    from trade.data.loader import load_price_csv
+    from trade.data import CsvPriceProvider
     from trade.models import BacktestConfig
-    from trade.strategies import MovingAverageCrossStrategy
+    from trade.strategies import build_strategy
 
     data_path = _safe_data_path(params.get("data", ["data/sample_prices.csv"])[0])
+    strategy_name = params.get("strategy", ["moving_average"])[0]
     short_window = _int(params, "short_window", 20)
     long_window = _int(params, "long_window", 60)
+    if short_window >= long_window:
+        raise ValueError("short_window must be smaller than long_window.")
+    start = _optional_str(params, "start")
+    end = _optional_str(params, "end")
+    cash = _float(params, "cash", 100_000.0)
+    commission_rate = _float(params, "commission_rate", 0.0003)
+    slippage_rate = _float(params, "slippage_rate", 0.0002)
 
-    prices = load_price_csv(data_path)
-    strategy = MovingAverageCrossStrategy(short_window=short_window, long_window=long_window)
+    prices = CsvPriceProvider(data_path).load(start=start, end=end)
+    strategy = build_strategy(
+        strategy_name,
+        short_window=short_window,
+        long_window=long_window,
+    )
     config = BacktestConfig(
-        initial_cash=_float(params, "cash", 100_000.0),
-        commission_rate=_float(params, "commission_rate", 0.0003),
-        slippage_rate=_float(params, "slippage_rate", 0.0002),
+        initial_cash=cash,
+        commission_rate=commission_rate,
+        slippage_rate=slippage_rate,
     )
 
     frame, result = Backtester(config).run(prices, strategy)
     chart_frame = frame.reset_index()
+    generated_at = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    run_id = secrets.token_hex(8)
 
-    return {
+    payload = {
         "result": asdict(result),
         "series": [
             {
@@ -197,12 +370,25 @@ def run_backtest_from_params(params: dict[str, list[str]]) -> dict:
             for _, row in chart_frame.iterrows()
         ],
         "meta": {
+            "run_id": run_id,
+            "generated_at": generated_at,
             "data": str(data_path.relative_to(PROJECT_ROOT)),
             "rows": len(frame),
             "short_window": short_window,
             "long_window": long_window,
+            "strategy": strategy_name,
+            "start": start,
+            "end": end,
+            "cash": cash,
+            "commission_rate": commission_rate,
+            "slippage_rate": slippage_rate,
         },
     }
+    payload["profile"] = dataset_profile(payload["meta"]["data"])
+    payload["report_markdown"] = _build_report(payload)
+    payload["series_csv"] = _series_to_csv(payload["series"])
+    _append_history(payload)
+    return payload
 
 
 class TradeWebHandler(BaseHTTPRequestHandler):
@@ -226,6 +412,22 @@ class TradeWebHandler(BaseHTTPRequestHandler):
                 if _require_auth(self) is None:
                     return
                 return _json_response(self, {"datasets": list_csv_files()})
+            if parsed.path == "/api/strategies":
+                if _require_auth(self) is None:
+                    return
+                return _json_response(self, {"strategies": list_strategy_specs()})
+            if parsed.path == "/api/dataset-profile":
+                if _require_auth(self) is None:
+                    return
+                params = parse_qs(parsed.query)
+                data = params.get("data", ["data/sample_prices.csv"])[0]
+                return _json_response(self, {"profile": dataset_profile(data)})
+            if parsed.path == "/api/backtest-history":
+                if _require_auth(self) is None:
+                    return
+                params = parse_qs(parsed.query)
+                limit = _int(params, "limit", 20)
+                return _json_response(self, {"history": list_backtest_history(limit=limit)})
             if parsed.path == "/api/backtest":
                 if _require_auth(self) is None:
                     return

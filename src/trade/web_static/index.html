@@ -50,9 +50,20 @@
           </label>
           <label>
             策略
-            <select name="strategy">
+            <select id="strategy" name="strategy">
               <option value="moving_average">双均线</option>
             </select>
+          </label>
+        </div>
+
+        <div class="field-row">
+          <label>
+            开始日期
+            <input name="start" type="date" />
+          </label>
+          <label>
+            结束日期
+            <input name="end" type="date" />
           </label>
         </div>
 
@@ -67,6 +78,12 @@
           </label>
         </div>
 
+        <div class="preset-row" aria-label="参数预设">
+          <button type="button" class="ghost-button preset-button" data-short="5" data-long="20">MA 5/20</button>
+          <button type="button" class="ghost-button preset-button" data-short="10" data-long="30">MA 10/30</button>
+          <button type="button" class="ghost-button preset-button" data-short="20" data-long="60">MA 20/60</button>
+        </div>
+
         <div class="field-row">
           <label>
             手续费率
@@ -79,6 +96,10 @@
         </div>
 
         <button type="submit">启动回测</button>
+        <div class="action-row">
+          <button id="download-report" type="button" class="ghost-button" disabled>导出报告</button>
+          <button id="download-csv" type="button" class="ghost-button" disabled>导出曲线</button>
+        </div>
         <p id="status" class="status">准备就绪</p>
       </form>
     </aside>
@@ -97,6 +118,24 @@
 
       <section class="metrics" id="metrics"></section>
 
+      <section class="insight-grid">
+        <article class="info-panel">
+          <div class="chart-header">
+            <h3>数据画像</h3>
+            <span>Dataset Profile</span>
+          </div>
+          <dl id="dataset-profile" class="profile-list"></dl>
+        </article>
+
+        <article class="info-panel">
+          <div class="chart-header">
+            <h3>研究报告</h3>
+            <span>Markdown</span>
+          </div>
+          <pre id="report-preview" class="report-preview">等待回测数据</pre>
+        </article>
+      </section>
+
       <section class="chart-area">
         <div class="chart-header">
           <h3>净值与价格</h3>
@@ -111,6 +150,14 @@
           <span>Drawdown</span>
         </div>
         <canvas id="drawdown-chart" width="1200" height="220"></canvas>
+      </section>
+
+      <section class="chart-area">
+        <div class="chart-header">
+          <h3>回测历史</h3>
+          <span>Recent Runs</span>
+        </div>
+        <div id="history-list" class="history-list"></div>
       </section>
     </main>
 
